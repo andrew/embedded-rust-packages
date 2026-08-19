@@ -1,0 +1,7 @@
+/cache/
+/out/
+*.db
+*.db-shm
+*.db-wal
+*.log
+/.ruby-lsp/
