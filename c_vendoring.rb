@@ -23,7 +23,8 @@ module CVendoring
         objc-sys android_log-sys android_system_properties
         fuchsia-zircon-sys cloudabi-sys hermit-abi-sys
         libloading-sys
-        winapi mach_o_sys cesu8-sys tree-sitter-language
+        winapi winapi-util ntapi mach mach2 mach_o_sys cty ash
+        libc bindgen cbindgen cesu8-sys tree-sitter-language
         webview2-com-sys webkit2gtk-sys soup3-sys javascriptcore-rs-sys
         gdkwayland-sys gdkx11-sys gdk4-sys gtk4-sys gsk4-sys
         glutin_egl_sys glutin_glx_sys glutin_wgl_sys glutin_gles2_sys
@@ -55,6 +56,7 @@ module CVendoring
     def self.vendors_c?(name)
         return false if name.match?(RS_SYS)
         return false if name.match?(WINAPI_SYS)
+        return false if name.start_with?("objc2-")
         return false if FFI_ONLY_SYS.include?(name)
         return true  if name.match?(/[-_]sys\z/) || name.end_with?("-src")
         return true  if name.start_with?("tree-sitter-") || name == "tree-sitter"
