@@ -1,0 +1,12 @@
+# CVE ids that match a -sys crate's upstream by version range but sit in a
+# component the crate does not build. One `<crate> <CVE>` per line; `#` starts
+# a comment. crate_cve_ranges.rb drops these before emitting a range.
+
+# libz-sys builds zlib's core inflate/deflate; contrib/minizip is not compiled.
+libz-sys CVE-2023-45853
+
+# lzma-sys builds liblzma only; xzgrep/xzdiff shell scripts are not shipped.
+lzma-sys CVE-2022-1271
+
+# bzip2-sys builds libbz2 only; bzip2recover is a separate CLI binary.
+bzip2-sys CVE-2026-42250
