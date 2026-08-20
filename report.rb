@@ -161,6 +161,35 @@ File.open(scrutineer_path, "w") do |f|
 end
 puts "wrote #{embedded.size} embedded + #{sibling.size} sibling-runtime repos -> #{scrutineer_path}"
 
+# Repos that ship Rust into a host package but commit no Cargo.lock. The wheel
+# / .node / NIF was built from a resolved tree that isn't recorded in the repo,
+# so advisories.rb has only constraint strings to query and the shipped crate
+# versions are unknowable without unpacking the artefact or its CI build log.
+nolock = db.execute(<<~SQL)
+  SELECT r.repository_url, r.cargo_toml_count, r.bridge_tools, r.cargo_toml_paths, r.brief_languages,
+         MAX(COALESCE(p.dependent_repos, 0)) AS dep_repos,
+         GROUP_CONCAT(DISTINCT p.ecosystem) AS ecosystems,
+         GROUP_CONCAT(DISTINCT p.purl) AS purls
+  FROM repos r JOIN packages p ON p.repository_url = r.repository_url
+  WHERE r.has_rust = 1 AND r.cargo_toml_count > 0 AND r.has_cargo_lock = 0
+    AND p.ecosystem <> 'cargo' AND #{HOST}
+  GROUP BY r.repository_url
+  ORDER BY dep_repos DESC
+SQL
+nolock.each do |r|
+  r["sibling_runtime"] = sibling_runtime?(r["brief_languages"], r["bridge_tools"], r["cargo_toml_paths"]) ? 1 : 0
+end
+nolock_path = File.join(OUT, "no-lock.csv")
+CSV.open(nolock_path, "w") do |csv|
+  csv << %w[repository_url ecosystems dependent_repos cargo_toml_count bridge_tools sibling_runtime purls]
+  nolock.each do |r|
+    csv << [r["repository_url"], r["ecosystems"], r["dep_repos"], r["cargo_toml_count"],
+            r["bridge_tools"], r["sibling_runtime"], r["purls"]]
+  end
+end
+nolock_embedded = nolock.count { |r| r["sibling_runtime"] == 0 }
+puts "wrote #{nolock.size} no-Cargo.lock repos (#{nolock_embedded} embedded, #{nolock.size - nolock_embedded} sibling-runtime) -> #{nolock_path}"
+
 # Repos where the filesystem says Rust but brief under-reported. Two shapes:
 #   hard: Cargo.toml / Cargo.lock / Rust LOC on disk, brief reported nothing
 #         Rust-related at all. Missing knowledge entry or detection bug.
