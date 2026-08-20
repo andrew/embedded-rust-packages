@@ -1,0 +1,14 @@
+#!/bin/sh
+# Wrapper so brief's scc invocation counts fetched submodule content.
+# scc reads .gitmodules and skips listed paths by default; --no-gitmodule
+# disables that. brief hardcodes its scc args (detect/detect.go sccArgs) with
+# no passthrough, so this shim on PATH is the only way to inject the flag
+# without patching brief.
+self=$(cd "$(dirname "$0")" && pwd)/scc
+IFS=:
+for d in $PATH; do
+    p="$d/scc"
+    [ -x "$p" ] && [ "$p" != "$self" ] && exec "$p" --no-gitmodule "$@"
+done
+echo "scc: real binary not found on PATH" >&2
+exit 127

@@ -3,8 +3,9 @@
 # Creates the packages table (one row per purl) and seeds the repos table
 # (one row per unique repository_url) from embedded repo_metadata.
 #
-# crates.io is excluded: those are already Rust and already covered by
-# rustsec. We're looking for Rust that ships inside other ecosystems.
+# crates.io is not in the default REGISTRIES: those are already Rust and
+# already covered by rustsec. It can be passed explicitly to compare C/C++
+# adoption inside Rust crates against Rust adoption inside other ecosystems.
 #
 # Responses cached under cache/packages so re-runs are cheap.
 #

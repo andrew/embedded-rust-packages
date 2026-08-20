@@ -41,8 +41,11 @@ db.results_as_hash = true
 
 total_repos   = db.get_first_value("SELECT COUNT(*) FROM repos")
 scanned_repos = db.get_first_value("SELECT COUNT(*) FROM repos WHERE scanned_at IS NOT NULL")
-RUST = "has_rust = 1 AND (cargo_toml_count > 0 OR COALESCE(bridge_tools,'') <> '')"
-rust_repos    = db.get_first_value("SELECT COUNT(*) FROM repos WHERE #{RUST}")
+# A cargo-only repo is just a Rust crate, not Rust embedded in a host language.
+# Repos that publish to cargo AND another registry stay in via the other purl.
+HOST = "EXISTS (SELECT 1 FROM packages hp WHERE hp.repository_url = r.repository_url AND hp.ecosystem <> 'cargo')"
+RUST = "has_rust = 1 AND (cargo_toml_count > 0 OR COALESCE(bridge_tools,'') <> '') AND #{HOST}"
+rust_repos    = db.get_first_value("SELECT COUNT(*) FROM repos r WHERE #{RUST}")
 
 puts "repos:   #{total_repos} total, #{scanned_repos} scanned, #{rust_repos} with rust"
 puts
@@ -52,6 +55,7 @@ db.execute(<<~SQL).each do |r|
   SELECT p.ecosystem, COUNT(DISTINCT p.purl) AS n
   FROM packages p JOIN repos r ON r.repository_url = p.repository_url
   WHERE r.has_rust = 1 AND (r.cargo_toml_count > 0 OR COALESCE(r.bridge_tools,'') <> '')
+    AND p.ecosystem <> 'cargo'
   GROUP BY p.ecosystem ORDER BY n DESC
 SQL
   puts "  #{r["ecosystem"].ljust(12)} #{r["n"]}"
@@ -59,13 +63,13 @@ end
 puts
 
 puts "by bridge tool:"
-db.execute("SELECT bridge_tools FROM repos WHERE #{RUST}")
+db.execute("SELECT bridge_tools FROM repos r WHERE #{RUST}")
   .flat_map { |r| (r["bridge_tools"] || "").split(",") }
   .reject(&:empty?)
   .tally
   .sort_by { |_, n| -n }
   .each { |tool, n| puts "  #{tool.ljust(18)} #{n}" }
-none = db.get_first_value("SELECT COUNT(*) FROM repos WHERE #{RUST} AND (bridge_tools IS NULL OR bridge_tools = '')")
+none = db.get_first_value("SELECT COUNT(*) FROM repos r WHERE #{RUST} AND (bridge_tools IS NULL OR bridge_tools = '')")
 puts "  #{"(none detected)".ljust(18)} #{none}"
 puts
 
@@ -81,6 +85,7 @@ rows = db.execute(<<~SQL)
   FROM packages p
   JOIN repos r ON r.repository_url = p.repository_url
   WHERE r.has_rust = 1 AND (r.cargo_toml_count > 0 OR COALESCE(r.bridge_tools,'') <> '')
+    AND p.ecosystem <> 'cargo'
   ORDER BY COALESCE(p.dependent_repos, 0) DESC, COALESCE(p.downloads, 0) DESC
 SQL
 rows.each do |r|
@@ -126,6 +131,7 @@ repo_rows = db.execute(<<~SQL)
          MAX(COALESCE(p.dependent_repos, 0)) AS dep_repos
   FROM repos r JOIN packages p ON p.repository_url = r.repository_url
   WHERE r.has_rust = 1 AND (r.cargo_toml_count > 0 OR COALESCE(r.bridge_tools,'') <> '')
+    AND p.ecosystem <> 'cargo'
   GROUP BY r.repository_url
   ORDER BY dep_repos DESC
 SQL
@@ -165,8 +171,8 @@ gaps = db.execute(<<~SQL)
   SELECT repository_url, rust_loc, cargo_toml_count, has_cargo_lock,
          cargo_toml_paths, brief_languages, signals,
          CASE WHEN signals NOT LIKE '%brief:%' THEN 'hard' ELSE 'soft' END AS kind
-  FROM repos
-  WHERE has_rust = 1 AND (cargo_toml_count > 0 OR COALESCE(bridge_tools,'') <> '')
+  FROM repos r
+  WHERE #{RUST}
     AND (signals NOT LIKE '%brief:%'
          OR (cargo_toml_count > 0
              AND signals NOT LIKE '%brief:cargo%'
@@ -213,7 +219,7 @@ if db.get_first_value("SELECT name FROM sqlite_master WHERE type='table' AND nam
            GROUP_CONCAT(DISTINCT c.repository_url) AS repo_urls
     FROM crate_deps c
     JOIN repos r ON r.repository_url = c.repository_url
-    WHERE r.has_rust = 1
+    WHERE r.has_rust = 1 AND #{HOST}
     GROUP BY c.crate
     ORDER BY repos DESC, c.crate
   SQL

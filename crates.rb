@@ -83,7 +83,7 @@ def crate_deps(url, toml_paths)
         rows << {
           "cargo_dir"   => d,
           "crate"       => dep["name"],
-          "requirement" => dep["version"],
+          "requirement" => dep["version"] || "",
           "purl"        => dep["purl"],
           "scope"       => dep["scope"],
           "direct"      => dep["direct"] ? 1 : 0,
@@ -106,7 +106,7 @@ def crate_deps(url, toml_paths)
       rows << {
         "cargo_dir"   => ".",
         "crate"       => dep["name"],
-        "requirement" => dep["version"],
+        "requirement" => dep["version"] || "",
         "purl"        => dep["purl"],
         "scope"       => dep["scope"],
         "direct"      => dep["direct"] ? 1 : 0,
@@ -125,25 +125,29 @@ end
 db = SQLite3::Database.new(DB_PATH)
 db.busy_timeout = 5000
 db.results_as_hash = true
+# requirement is part of the PK: a single Cargo.lock can resolve multiple
+# major versions of the same crate (h2 0.3.x and 0.4.x side by side), and each
+# is a distinct compiled artefact with its own advisory exposure.
 db.execute_batch <<~SQL
   CREATE TABLE IF NOT EXISTS crate_deps (
     repository_url TEXT NOT NULL,
     cargo_dir      TEXT NOT NULL,
     crate          TEXT NOT NULL,
-    requirement    TEXT,
+    requirement    TEXT NOT NULL DEFAULT '',
     purl           TEXT,
     scope          TEXT,
     direct         INTEGER,
-    PRIMARY KEY (repository_url, cargo_dir, crate, scope)
+    PRIMARY KEY (repository_url, cargo_dir, crate, requirement, scope)
   );
   CREATE INDEX IF NOT EXISTS idx_crate_deps_crate ON crate_deps(crate);
 SQL
 
 repos = db.execute(<<~SQL)
-  SELECT repository_url, cargo_toml_paths
-  FROM repos
-  WHERE has_rust = 1 AND cargo_toml_count > 0
-  ORDER BY repository_url
+  SELECT r.repository_url, r.cargo_toml_paths
+  FROM repos r
+  WHERE r.has_rust = 1 AND r.cargo_toml_count > 0
+    AND EXISTS (SELECT 1 FROM packages p WHERE p.repository_url = r.repository_url AND p.ecosystem <> 'cargo')
+  ORDER BY r.repository_url
   #{"LIMIT #{LIMIT}" if LIMIT}
 SQL
 
@@ -152,8 +156,8 @@ puts "#{repos.size} repos to extract crate deps from"
 ins = db.prepare <<~SQL
   INSERT INTO crate_deps (repository_url, cargo_dir, crate, requirement, purl, scope, direct)
   VALUES (?,?,?,?,?,?,?)
-  ON CONFLICT(repository_url, cargo_dir, crate, scope) DO UPDATE SET
-    requirement=excluded.requirement, purl=excluded.purl, direct=excluded.direct
+  ON CONFLICT(repository_url, cargo_dir, crate, requirement, scope) DO UPDATE SET
+    purl=excluded.purl, direct=MAX(direct, excluded.direct)
 SQL
 
 total = 0
@@ -164,7 +168,7 @@ repos.each_with_index do |r, i|
   db.transaction do
     db.execute("DELETE FROM crate_deps WHERE repository_url = ?", url) if REFRESH
     deps.each do |d|
-      ins.execute(url, d["cargo_dir"], d["crate"], d["requirement"], d["purl"], d["scope"], d["direct"])
+      ins.execute(url, d["cargo_dir"], d["crate"], d["requirement"] || "", d["purl"], d["scope"], d["direct"])
     end
   end
   total += deps.size

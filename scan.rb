@@ -25,10 +25,11 @@ WORKDIR = __dir__
 DB_PATH = File.join(WORKDIR, "rustdeps.db")
 CACHE   = File.join(WORKDIR, "cache", "scan")
 BRIEF   = File.join(WORKDIR, "cache", "brief")
-LIMIT     = ARGV.grep(/\A\d+\z/).first&.to_i
-REDERIVE  = ARGV.include?("--rederive")
-REFRESH   = ARGV.include?("--refresh")
-ONLY_RUST = ARGV.include?("--only-rust")
+LIMIT       = ARGV.grep(/\A\d+\z/).first&.to_i
+REDERIVE    = ARGV.include?("--rederive")
+REFRESH     = ARGV.include?("--refresh")
+ONLY_RUST   = ARGV.include?("--only-rust")
+ONLY_SUBMOD = ARGV.include?("--only-submodules")
 
 CLONE_HOSTS = %w[github.com gitlab.com codeberg.org gitea.com sr.ht git.sr.ht]
 
@@ -47,8 +48,9 @@ FileUtils.mkdir_p(BRIEF)
 
 def hkey(url) = Digest::SHA256.hexdigest(url)[0, 32]
 
-def run(*cmd, dir: nil)
-  out, _, st = Open3.capture3(*cmd, chdir: dir || Dir.pwd)
+def run(env = {}, *cmd, dir: nil)
+  env, cmd = {}, [env, *cmd] unless env.is_a?(Hash)
+  out, _, st = Open3.capture3(env, *cmd, chdir: dir || Dir.pwd)
   st.success? ? out : nil
 end
 
@@ -58,10 +60,23 @@ def clone(url, dir)
          "-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"]
   _, _, st = Open3.capture3(env, "git", *cfg, "clone", "--quiet", "--depth", "1",
                              "--filter=blob:none", "#{url}.git", dir)
-  return true if st.success?
-  _, _, st = Open3.capture3(env, "git", *cfg, "clone", "--quiet", "--depth", "1",
-                             "--filter=blob:none", url, dir)
-  st.success?
+  unless st.success?
+    _, _, st = Open3.capture3(env, "git", *cfg, "clone", "--quiet", "--depth", "1",
+                               "--filter=blob:none", url, dir)
+  end
+  return false unless st.success?
+
+  # Best-effort shallow submodule fetch so vendored source (openssl-src,
+  # onig_sys, mozjpeg-sys, ...) is visible to brief/scc. A dead or private
+  # submodule must not fail the whole scan, so errors are swallowed. Not
+  # recursive: one level is enough for the -sys vendoring pattern and avoids
+  # LLVM-sized nested trees.
+  if File.exist?(File.join(dir, ".gitmodules"))
+    Open3.capture3(env, "git", *cfg, "-c", "protocol.file.allow=never",
+                   "-C", dir, "submodule", "update", "--init",
+                   "--depth", "1", "--jobs", "4")
+  end
+  true
 end
 
 def find_cargo(dir)
@@ -96,7 +111,7 @@ def scan(url)
       return nil
     end
 
-    brief_out = run("brief", "--json", dir)
+    brief_out = run({ "PATH" => "#{File.join(WORKDIR, "bin")}:#{ENV["PATH"]}" }, "brief", "--json", dir)
     brief = brief_out ? (JSON.parse(brief_out) rescue {}) : {}
     File.write(File.join(BRIEF, "#{hkey(url)}.json"), brief_out) if brief_out
 
@@ -143,6 +158,7 @@ db.results_as_hash = true
 
 where = (REDERIVE || REFRESH) ? "" : "AND r.scanned_at IS NULL"
 where += " AND r.has_rust = 1" if ONLY_RUST
+where += " AND r.has_submodules = 1" if ONLY_SUBMOD
 urls = db.execute(<<~SQL).map { |r| r["repository_url"] }
   SELECT r.repository_url,
          MAX(COALESCE(p.dependent_repos, 0)) AS dep_repos,
