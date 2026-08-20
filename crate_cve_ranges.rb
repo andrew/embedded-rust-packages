@@ -43,6 +43,10 @@ CPE_PRODUCT_ALIAS = {
     "oniguruma" => %w[oniguruma onig],
     "zstd"      => %w[zstandard zstd],
     "rocksdb"   => %w[rocksdb],
+    "sdl2"      => %w[libsdl simple_directmedia_layer sdl],
+    "nghttp2"   => %w[nghttp2 libnghttp2],
+    "grpc"      => %w[grpc grpc-cpp],
+    "protobuf"  => %w[protobuf protobuf-cpp],
 }.freeze
 
 REJECTED = File.readlines(File.join(WORKDIR, "data", "rejected.txt"))
