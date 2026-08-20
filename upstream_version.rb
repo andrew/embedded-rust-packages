@@ -51,6 +51,21 @@ PROBES = {
     "lua-src"         => ["lua",       [/#define LUA_VERSION_RELEASE\s+"(\d+)".*?LUA_VERSION_MINOR\s+"(\d+)".*?LUA_VERSION_MAJOR\s+"(\d+)"/m,
                                         /#define LUA_RELEASE\s+"Lua ([\d.]+)"/]],
     "hidapi"          => ["hidapi",    [/HID_API_VERSION_MAJOR\s+(\d+).*?_MINOR\s+(\d+).*?_PATCH\s+(\d+)/m]],
+    "libz-ng-sys"     => ["zlib-ng",   [/#define ZLIBNG_VERSION\s+"([\d.]+)"/]],
+    "sdl2-sys"        => ["sdl2",      [/set\(SDL_MAJOR_VERSION (\d+)\).*?set\(SDL_MINOR_VERSION (\d+)\).*?set\(SDL_MICRO_VERSION (\d+)\)/m,
+                                        /SDL_MAJOR_VERSION\s+(\d+).*?SDL_MINOR_VERSION\s+(\d+).*?SDL_PATCHLEVEL\s+(\d+)/m]],
+    "lmdb-rkv-sys"    => ["lmdb",      [/MDB_VERSION_MAJOR\s+(\d+).*?MDB_VERSION_MINOR\s+(\d+).*?MDB_VERSION_PATCH\s+(\d+)/m]],
+    "lmdb-sys"        => ["lmdb",      [/MDB_VERSION_MAJOR\s+(\d+).*?MDB_VERSION_MINOR\s+(\d+).*?MDB_VERSION_PATCH\s+(\d+)/m]],
+    "oboe-sys"        => ["oboe",      [/OBOE_VERSION_MAJOR\s+(\d+).*?OBOE_VERSION_MINOR\s+(\d+).*?OBOE_VERSION_PATCH\s+(\d+)/m]],
+    "mysqlclient-sys" => ["mysql",     [/MYSQL_SERVER_VERSION:\s*&\[u8;\s*\d+\]\s*=\s*b"([\d.]+)/,
+                                        /#define MYSQL_SERVER_VERSION\s+"([\d.]+)"/]],
+    "sasl2-sys"       => ["cyrus-sasl",[/SASL_VERSION_MAJOR\s+(\d+).*?SASL_VERSION_MINOR\s+(\d+).*?SASL_VERSION_STEP\s+(\d+)/m]],
+    "protobuf-src"    => ["protobuf",  [/#define PROTOBUF_CPP_VERSION_STRING\s+"([\d.]+)"/,
+                                        /GOOGLE_PROTOBUF_VERSION\s+(\d)0*(\d\d)0*(\d\d\d)/]],
+    # mysqlclient-sys bundles bindgen output for several MySQL and MariaDB
+    # ABI versions; the highest match is whichever header set has the largest
+    # MYSQL_SERVER_VERSION string, which is MariaDB 10.x, so this reports the
+    # MariaDB version. Treat as approximate.
 }
 
 def fetch(crate, ver)

@@ -80,6 +80,13 @@ module CVendoring
         "blosc2-sys"         => ["c-blosc2", /\+([\d.]+)/],
         "blosc2-rs"          => ["c-blosc2", /\+([\d.]+)/],
         "liblzma-sys"        => ["xz",       /\+([\d.]+)/],
+        "rdkafka-sys"        => ["librdkafka", /\+([\d.]+)/],
+        "protobuf-src"       => ["protobuf",   /\+([\d.]+)/],
+        "grpcio-sys"         => ["grpc",       /\+([\d.]+)/],
+        "sasl2-sys"          => ["cyrus-sasl", /\+([\d.]+)/],
+        "libgit2-sys"        => ["libgit2",    /\+([\d.]+)/],
+        "libssh2-sys"        => ["libssh2",    /\+([\d.]+)/],
+        "libnghttp2-sys"     => ["nghttp2",    /\+([\d.]+)/],
     }.freeze
 
     # OSV ecosystems to query for upstream C CVEs. Distro trackers cover most
