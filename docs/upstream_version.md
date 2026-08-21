@@ -29,5 +29,8 @@ The tarball for `libsqlite3-sys-0.30.1` contains `sqlite3/sqlite3.h` with `#defi
 ```
 
 Capture groups are joined with `.` so that returns `["oniguruma", "6.9.10"]`.
+`brotli-sys` is the exception: Brotli stores `(major << 24) | (minor << 12) |
+patch` as a hexadecimal integer, so `version_from_match` decodes that packed
+value after the regex matches it.
 
 Crates whose vendored source has no version macro (`ring` vendors a BoringSSL commit; the only identifier is the git SHA in `ring`'s own `Cargo.toml.orig`) are outside this method and need a per-release lookup table built by other means.

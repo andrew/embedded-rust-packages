@@ -62,11 +62,37 @@ PROBES = {
     "sasl2-sys"       => ["cyrus-sasl",[/SASL_VERSION_MAJOR\s+(\d+).*?SASL_VERSION_MINOR\s+(\d+).*?SASL_VERSION_STEP\s+(\d+)/m]],
     "protobuf-src"    => ["protobuf",  [/#define PROTOBUF_CPP_VERSION_STRING\s+"([\d.]+)"/,
                                         /GOOGLE_PROTOBUF_VERSION\s+(\d)0*(\d\d)0*(\d\d\d)/]],
+    "brotli-sys"      => ["brotli",    [/#define BROTLI_VERSION\s+"([\d.]+)"/,
+                                        /#define BROTLI_VERSION\s+(0x[\da-f]+)/i]],
+    "grpcio-sys"       => ["grpc",      [/set\(PACKAGE_VERSION\s+"([\d.]+)"\)/]],
+    "torch-sys"        => ["pytorch",   [/const TORCH_VERSION:\s*&str\s*=\s*"([\d.]+)"/]],
     # mysqlclient-sys bundles bindgen output for several MySQL and MariaDB
     # ABI versions; the highest match is whichever header set has the largest
     # MYSQL_SERVER_VERSION string, which is MariaDB 10.x, so this reports the
     # MariaDB version. Treat as approximate.
 }
+
+def version_from_match(crate, match)
+    captures = Array(match)
+    if crate == "brotli-sys" && captures.one? && captures.first.start_with?("0x")
+        encoded = Integer(captures.first)
+        return [encoded >> 24, (encoded >> 12) & 0xfff, encoded & 0xfff].join(".")
+    end
+    captures.join(".")
+end
+
+def extract_body(crate, body)
+    up_name, probes = PROBES[crate]
+    return nil unless up_name
+    probes.each do |re|
+        matches = body.scan(re)
+        next if matches.empty?
+        ver_str = matches.map { |m| version_from_match(crate, m) }
+                         .max_by { |v| v.split(".").map(&:to_i) }
+        return [up_name, ver_str]
+    end
+    nil
+end
 
 def fetch(crate, ver)
     cache = File.join(CACHE, "#{crate}-#{ver}.crate")
@@ -82,19 +108,11 @@ def extract(crate, ver)
     if (m = CVendoring.upstream_for(crate, ver)) && ver.include?("+")
         return m
     end
-    up_name, probes = PROBES[crate]
-    return nil unless up_name
+    return nil unless PROBES.key?(crate)
     path = fetch(crate, ver) or return nil
     body, = Open3.capture3("tar", "-xzOf", path)
     body = body.force_encoding("BINARY").scrub
-    probes.each do |re|
-        # For crates bundling multiple variants, take the highest version.
-        matches = body.scan(re)
-        next if matches.empty?
-        ver_str = matches.map { |m| Array(m).join(".") }.max_by { |v| v.split(".").map(&:to_i) }
-        return [up_name, ver_str]
-    end
-    nil
+    extract_body(crate, body)
 end
 
 def all_versions(crate)
@@ -105,42 +123,44 @@ rescue
     []
 end
 
-targets = case
-when ARGV == ["--all"]
-    db = SQLite3::Database.new(File.join(WORKDIR, "rustdeps.db"))
-    db.execute("SELECT DISTINCT crate, requirement FROM crate_deps WHERE requirement GLOB '[0-9]*.[0-9]*.[0-9]*'")
-      .select { |c, _| PROBES.key?(c) && !CVendoring::UPSTREAM.key?(c) }
-when ARGV[0] == "--full"
-    # Every published version of each named crate (or every mappable crate).
-    crates = ARGV[1..].empty? ? (PROBES.keys | CVendoring::UPSTREAM.keys) : ARGV[1..]
-    crates.flat_map { |c| all_versions(c).map { |v| [c, v] } }
-else
-    crate = ARGV.shift or abort "usage: #{$0} <crate> <version>... | --all | --full [crate...]"
-    ARGV.map { |v| [crate, v] }
-end
-
-seen = Hash.new { |h, k| h[k] = [] }
-targets.sort.each do |crate, ver|
-    up = extract(crate, ver)
-    if up
-        seen[[crate, up[0]]] << [ver, up[1]]
-        printf "        [%-18s %-10s] => [%-12s %s],\n",
-               "\"#{crate}\",", "\"#{ver}\"", "\"#{up[0]}\",", "\"#{up[1]}\""
+if $PROGRAM_NAME == __FILE__
+    targets = case
+    when ARGV == ["--all"]
+        db = SQLite3::Database.new(File.join(WORKDIR, "rustdeps.db"))
+        db.execute("SELECT DISTINCT crate, requirement FROM crate_deps WHERE requirement GLOB '[0-9]*.[0-9]*.[0-9]*'")
+          .select { |c, _| PROBES.key?(c) && !CVendoring::UPSTREAM.key?(c) }
+    when ARGV[0] == "--full"
+        # Every published version of each named crate (or every mappable crate).
+        crates = ARGV[1..].empty? ? (PROBES.keys | CVendoring::UPSTREAM.keys) : ARGV[1..]
+        crates.flat_map { |c| all_versions(c).map { |v| [c, v] } }
     else
-        warn "  # #{crate}@#{ver}: no match"
+        crate = ARGV.shift or abort "usage: #{$0} <crate> <version>... | --all | --full [crate...]"
+        ARGV.map { |v| [crate, v] }
     end
-end
 
-# Collapse to ranges: for each upstream version, the crate-version span that
-# bundles it. This is what a RUSTSEC advisory range would target.
-if targets.size > 3
-    warn ""
-    warn "# crate-version ranges per upstream version:"
-    seen.each do |(crate, up_name), pairs|
-        by_up = pairs.group_by { |_, uv| uv }
-        by_up.sort_by { |uv, _| Gem::Version.new(uv) rescue uv }.each do |uv, vs|
-            cvs = vs.map(&:first).sort_by { |v| Gem::Version.new(v) rescue v }
-            warn "#   #{crate} [#{cvs.first} .. #{cvs.last}] -> #{up_name} #{uv}"
+    seen = Hash.new { |h, k| h[k] = [] }
+    targets.sort.each do |crate, ver|
+        up = extract(crate, ver)
+        if up
+            seen[[crate, up[0]]] << [ver, up[1]]
+            printf "        [%-18s %-10s] => [%-12s %s],\n",
+                   "\"#{crate}\",", "\"#{ver}\"", "\"#{up[0]}\",", "\"#{up[1]}\""
+        else
+            warn "  # #{crate}@#{ver}: no match"
+        end
+    end
+
+    # Collapse to ranges: for each upstream version, the crate-version span that
+    # bundles it. This is what a RUSTSEC advisory range would target.
+    if targets.size > 3
+        warn ""
+        warn "# crate-version ranges per upstream version:"
+        seen.each do |(crate, up_name), pairs|
+            by_up = pairs.group_by { |_, uv| uv }
+            by_up.sort_by { |uv, _| Gem::Version.new(uv) rescue uv }.each do |uv, vs|
+                cvs = vs.map(&:first).sort_by { |v| Gem::Version.new(v) rescue v }
+                warn "#   #{crate} [#{cvs.first} .. #{cvs.last}] -> #{up_name} #{uv}"
+            end
         end
     end
 end
